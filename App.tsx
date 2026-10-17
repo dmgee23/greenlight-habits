@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, Alert, TextInput, Modal } from 'react-native';
 import { initDatabase, Habit } from './db/schema';
-import { getHabits, addHabit, completeHabit, resetToBaseline, calculateDailyScore } from './services/habitEngine';
+import { getHabits, addHabit, completeHabit, resetToBaseline, calculateDailyScore, getWeeklyCompletionStats } from './services/habitEngine';
 import JournalScreen from './screens/JournalScreen';
+// Add these imports to the top of App.tsx
+import { registerForPushNotificationsAsync, scheduleMorningReminder, scheduleEveningReminder } from './services/notificationService';
+
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'habits' | 'journal'>('habits');
   const [habits, setHabits] = useState<Habit[]>([]);
+  const [weeklyStats, setWeeklyStats] = useState<{ dayLabel: string; count: number; date: string }[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newUnit, setNewUnit] = useState('minutes');
@@ -15,6 +19,20 @@ export default function App() {
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
+    // Inside your main App component's useEffect, add:
+  useEffect(() => {
+    try {
+      initDatabase();
+      loadData();
+      // Register and schedule daily behavioral cues
+      registerForPushNotificationsAsync().then(() => {
+        scheduleMorningReminder();
+        scheduleEveningReminder();
+      });
+    } catch (e) {
+      console.error('Initialization error:', e);
+    }
+  }, []);
     initDatabase();
     loadData();
   }, []);
@@ -33,6 +51,7 @@ export default function App() {
       currentHabits = getHabits();
     }
     setHabits(currentHabits);
+    setWeeklyStats(getWeeklyCompletionStats());
   };
 
   const handleComplete = (habit: Habit) => {
@@ -78,6 +97,24 @@ export default function App() {
         <TouchableOpacity style={styles.addBtnHeader} onPress={() => setModalVisible(true)}>
           <Text style={styles.addBtnText}>+ Add Habit</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Checkpoint 1: Weekly Consistency Heatmap */}
+      <View style={styles.heatmapCard}>
+        <Text style={styles.heatmapTitle}>📊 Past 7 Days Consistency</Text>
+        <View style={styles.heatmapRow}>
+          {weeklyStats.map((item, index) => (
+            <View key={index} style={styles.dayColumn}>
+              <View 
+                style={[
+                  styles.daySquare, 
+                  { backgroundColor: item.count > 0 ? '#22c55e' : '#334155' }
+                ]} 
+              />
+              <Text style={styles.dayLabel}>{item.dayLabel}</Text>
+            </View>
+          ))}
+        </View>
       </View>
 
       {/* Navigation Switcher */}
@@ -157,12 +194,18 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a', paddingHorizontal: 16, paddingTop: 40 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingHorizontal: 4 },
   title: { fontSize: 24, fontWeight: 'bold', color: '#f8fafc' },
   subtitle: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
   scoreHighlight: { color: '#22c55e', fontWeight: 'bold' },
   addBtnHeader: { backgroundColor: '#3b82f6', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 },
   addBtnText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 13 },
+  heatmapCard: { backgroundColor: '#1e293b', borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  heatmapTitle: { fontSize: 13, color: '#94a3b8', fontWeight: '600', marginBottom: 8 },
+  heatmapRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  dayColumn: { alignItems: 'center', gap: 4 },
+  daySquare: { width: 32, height: 32, borderRadius: 6 },
+  dayLabel: { fontSize: 11, color: '#64748b' },
   navRow: { flexDirection: 'row', backgroundColor: '#1e293b', borderRadius: 8, padding: 4, marginBottom: 16 },
   navBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 6 },
   activeNav: { backgroundColor: '#334155' },

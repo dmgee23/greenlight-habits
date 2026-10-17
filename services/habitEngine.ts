@@ -75,3 +75,24 @@ export const calculateDailyScore = (dateStr: string): number => {
 
   return Math.round(score);
 };
+// Add to the bottom of services/habitEngine.ts
+
+export const getWeeklyCompletionStats = (): { dayLabel: string; count: number; date: string }[] => {
+  const stats = [];
+  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const dayLabel = daysOfWeek[d.getDay()];
+
+    const res = db.getFirstSync<any>(
+      `SELECT COUNT(*) as count FROM daily_logs WHERE date = ? AND completed = 1`,
+      [dateStr]
+    );
+
+    stats.push({ dayLabel, count: res?.count || 0, date: dateStr });
+  }
+  return stats;
+};
