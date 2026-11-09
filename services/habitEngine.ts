@@ -129,3 +129,10 @@ export const getWeeklyCompletionStats = (): { dayLabel: string; count: number; d
   }
   return stats;
 };
+
+export const getJournalEntryByDate = (dateStr: string) => {
+  return db.getFirstSync<any>(
+    `SELECT * FROM journal_entries WHERE date = ?`,
+    [dateStr]
+  );
+};

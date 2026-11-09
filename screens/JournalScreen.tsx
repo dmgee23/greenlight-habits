@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, Linking } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { db } from '../db/schema';
 import { calculateDailyScore } from '../services/habitEngine';
+import { generateDailyReflectionInsight } from '../services/aiService';
 
 export default function JournalScreen() {
-  const today = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [morningGratitude, setMorningGratitude] = useState('');
   const [dailyNonNegotiable, setDailyNonNegotiable] = useState('');
@@ -14,14 +15,17 @@ export default function JournalScreen() {
   const [greenlightMoment, setGreenlightMoment] = useState('');
   const [unforgivingHonesty, setUnforgivingHonesty] = useState('');
 
-  useEffect(() => {
-    loadJournal();
-  }, []);
+  const [aiInsight, setAiInsight] = useState('');
+  const [loadingAi, setLoadingAi] = useState(false);
 
-  const loadJournal = () => {
+  useEffect(() => {
+    loadJournal(selectedDate);
+  }, [selectedDate]);
+
+  const loadJournal = (dateStr: string) => {
     const entry = db.getFirstSync<any>(
       `SELECT * FROM journal_entries WHERE date = ?`,
-      [today]
+      [dateStr]
     );
     if (entry) {
       setMorningGratitude(entry.morning_gratitude || '');
@@ -30,7 +34,21 @@ export default function JournalScreen() {
       setEveningWin(entry.evening_win || '');
       setGreenlightMoment(entry.greenlight_moment || '');
       setUnforgivingHonesty(entry.unforgiving_honesty_reflection || '');
+    } else {
+      setMorningGratitude('');
+      setDailyNonNegotiable('');
+      setIdentityAffirmation('');
+      setEveningWin('');
+      setGreenlightMoment('');
+      setUnforgivingHonesty('');
     }
+    setAiInsight('');
+  };
+
+  const changeDateByDays = (days: number) => {
+    const current = new Date(selectedDate);
+    current.setDate(current.getDate() + days);
+    setSelectedDate(current.toISOString().split('T')[0]);
   };
 
   const handleSaveJournal = () => {
@@ -44,62 +62,39 @@ export default function JournalScreen() {
          evening_win = excluded.evening_win,
          greenlight_moment = excluded.greenlight_moment,
          unforgiving_honesty_reflection = excluded.unforgiving_honesty_reflection`,
-      [today, morningGratitude, dailyNonNegotiable, identityAffirmation, eveningWin, greenlightMoment, unforgivingHonesty]
+      [selectedDate, morningGratitude, dailyNonNegotiable, identityAffirmation, eveningWin, greenlightMoment, unforgivingHonesty]
     );
-    Alert.alert('Saved', 'Journal entries saved for today!');
+    Alert.alert('Saved', `Journal entry saved for ${selectedDate}`);
   };
 
-  const handleExportToObsidian = async () => {
-    // Enforce the design rule: Gated export requiring both morning & evening logs
-    if (!morningGratitude || !dailyNonNegotiable || !eveningWin || !greenlightMoment) {
-      Alert.alert('Incomplete Journal', 'Please fill out both your Morning Intentions and Evening Audit before exporting to Obsidian.');
-      return;
-    }
+  const handleGenerateAI = async () => {
+    setLoadingAi(true);
+    const score = calculateDailyScore(selectedDate);
 
-    handleSaveJournal();
-    const score = calculateDailyScore(today);
+    const insight = await generateDailyReflectionInsight(
+      selectedDate,
+      { gratitude: morningGratitude, nonNegotiable: dailyNonNegotiable, identity: identityAffirmation },
+      { win: eveningWin, greenlight: greenlightMoment, honesty: unforgivingHonesty },
+      score
+    );
 
-    // Construct clean Markdown formatting combining Greenlights & Bartlett frameworks
-    const markdownContent = `# Daily Journal: ${today}
-
-## 📊 Daily Success Score: ${score}%
-
-### ☀️ Morning Intentions
-- **Gratitude:** ${morningGratitude}
-- **Daily Non-Negotiable:** ${dailyNonNegotiable}
-- **Identity Affirmation:** ${identityAffirmation}
-
-### 🌙 Evening Audit & Greenlights
-- **Evening Win:** ${eveningWin}
-- **Greenlight Moment:** ${greenlightMoment}
-- **Unforgiving Honesty / Friction Review:** ${unforgivingHonesty}
-
----
-*Generated via Greenlight Habits App*
-`;
-
-    // Format deep link for Obsidian Advanced URI
-    const vaultName = 'Default'; // Change to your exact Obsidian vault name if needed
-    const fileName = `Journal_${today}`;
-    const encodedContent = encodeURIComponent(markdownContent);
-    const obsidianUrl = `obsidian://advanced-uri?vault=${vaultName}&filepath=Journal%2F${fileName}&data=${encodedContent}&mode=overwrite`;
-
-    try {
-      const supported = await Linking.canOpenURL(obsidianUrl);
-      if (supported) {
-        await Linking.openURL(obsidianUrl);
-        Alert.alert('Exported!', 'Successfully sent to your Obsidian vault.');
-      } else {
-        Alert.alert('Obsidian Error', 'Could not reach Obsidian via deep link. Ensure Obsidian is installed on your S24+.');
-      }
-    } catch (error) {
-      console.error(error);
-      Alert.alert('Error', 'Failed to trigger Obsidian export.');
-    }
+    setAiInsight(insight);
+    setLoadingAi(false);
   };
 
   return (
     <ScrollView style={styles.container}>
+      {/* Date Navigation Bar */}
+      <View style={styles.dateSelector}>
+        <TouchableOpacity style={styles.dateBtn} onPress={() => changeDateByDays(-1)}>
+          <Text style={styles.dateBtnText}>◀ Prev Day</Text>
+        </TouchableOpacity>
+        <Text style={styles.dateText}>{selectedDate}</Text>
+        <TouchableOpacity style={styles.dateBtn} onPress={() => changeDateByDays(1)}>
+          <Text style={styles.dateBtnText}>Next Day ▶</Text>
+        </TouchableOpacity>
+      </View>
+
       <Text style={styles.sectionHeader}>☀️ Morning Intentions</Text>
       <Text style={styles.label}>Morning Gratitude</Text>
       <TextInput style={styles.input} value={morningGratitude} onChangeText={setMorningGratitude} placeholder="What are you grateful for today?" placeholderTextColor="#64748b" />
@@ -122,13 +117,26 @@ export default function JournalScreen() {
 
       <View style={styles.buttonRow}>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSaveJournal}>
-          <Text style={styles.saveBtnText}>Save Journal</Text>
+          <Text style={styles.saveBtnText}>Save Entry</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.exportBtn} onPress={handleExportToObsidian}>
-          <Text style={styles.exportBtnText}>Export to Obsidian 🚀</Text>
+        <TouchableOpacity style={styles.aiBtn} onPress={handleGenerateAI} disabled={loadingAi}>
+          {loadingAi ? (
+            <ActivityIndicator color="#0f172a" />
+          ) : (
+            <Text style={styles.aiBtnText}>🤖 AI Feedback</Text>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* AI Feedback Output Card */}
+      {aiInsight !== '' && (
+        <View style={styles.aiCard}>
+          <Text style={styles.aiTitle}>🤖 AI Coach Analysis</Text>
+          <Text style={styles.aiText}>{aiInsight}</Text>
+        </View>
+      )}
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -136,12 +144,19 @@ export default function JournalScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
+  dateSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, backgroundColor: '#1e293b', padding: 12, borderRadius: 8 },
+  dateBtn: { backgroundColor: '#334155', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  dateBtnText: { color: '#38bdf8', fontWeight: 'bold', fontSize: 13 },
+  dateText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 16 },
   sectionHeader: { fontSize: 18, fontWeight: 'bold', color: '#38bdf8', marginBottom: 12 },
   label: { color: '#cbd5e1', fontSize: 14, fontWeight: '600', marginBottom: 4, marginTop: 8 },
   input: { backgroundColor: '#1e293b', color: '#f8fafc', borderRadius: 8, padding: 12, fontSize: 15, borderWidth: 1, borderColor: '#334155' },
   buttonRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
   saveBtn: { flex: 1, backgroundColor: '#334155', padding: 14, borderRadius: 8, alignItems: 'center' },
   saveBtnText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 14 },
-  exportBtn: { flex: 1, backgroundColor: '#22c55e', padding: 14, borderRadius: 8, alignItems: 'center' },
-  exportBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 14 },
+  aiBtn: { flex: 1, backgroundColor: '#38bdf8', padding: 14, borderRadius: 8, alignItems: 'center' },
+  aiBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 14 },
+  aiCard: { backgroundColor: '#1e293b', borderColor: '#38bdf8', borderWidth: 1, borderRadius: 12, padding: 16, marginTop: 20 },
+  aiTitle: { color: '#38bdf8', fontWeight: 'bold', fontSize: 16, marginBottom: 8 },
+  aiText: { color: '#e2e8f0', fontSize: 14, lineHeight: 20 },
 });
