@@ -9,6 +9,8 @@ export interface Habit {
   increment_rate: number;
   base_target: number;
   streak: number;
+  max_goal_integer: number;
+  reminder_time: string | null;
 }
 
 export interface JournalEntry {
@@ -20,21 +22,21 @@ export interface JournalEntry {
   evening_win: string;
   greenlight_moment: string;
   unforgiving_honesty_reflection: string;
-  honesty_score: number;
 }
 
 const db = SQLite.openDatabaseSync('greenlight_habits.db');
 
 export const initDatabase = () => {
+  // 1. Create base tables if they don't exist
   db.execSync(`
     CREATE TABLE IF NOT EXISTS habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       category TEXT NOT NULL,
-      current_target REAL NOT NULL,
+      current_target INTEGER NOT NULL,
       unit TEXT NOT NULL,
       increment_rate REAL DEFAULT 0.01,
-      base_target REAL NOT NULL,
+      base_target INTEGER NOT NULL,
       streak INTEGER DEFAULT 0
     );
 
@@ -56,10 +58,22 @@ export const initDatabase = () => {
       identity_affirmation TEXT,
       evening_win TEXT,
       greenlight_moment TEXT,
-      unforgiving_honesty_reflection TEXT,
-      honesty_score INTEGER DEFAULT 10
+      unforgiving_honesty_reflection TEXT
     );
   `);
+
+  // 2. Migration: Add missing columns if upgrading from an older database version
+  try {
+    db.execSync(`ALTER TABLE habits ADD COLUMN max_goal_integer INTEGER NOT NULL DEFAULT 25;`);
+  } catch (e) {
+    // Column already exists, safe to ignore
+  }
+
+  try {
+    db.execSync(`ALTER TABLE habits ADD COLUMN reminder_time TEXT;`);
+  } catch (e) {
+    // Column already exists, safe to ignore
+  }
 };
 
 export { db };

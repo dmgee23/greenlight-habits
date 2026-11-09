@@ -1,13 +1,14 @@
 import { db, Habit } from '../db/schema';
+import { scheduleHabitReminder, cancelScheduledNotificationAsync } from './notificationService';
 
 export const getHabits = (): Habit[] => {
-  return db.getAllSync<Habit>('SELECT * FROM habits');
+  return db.getAllSync<Habit>('SELECT * FROM habits ORDER BY title ASC');
 };
 
 export const addHabit = (habit: Omit<Habit, 'id' | 'streak'>) => {
-  db.runSync(
-    `INSERT INTO habits (title, category, current_target, unit, increment_rate, base_target, streak) 
-     VALUES (?, ?, ?, ?, ?, ?, 0)`,
+  const result = db.runSync(
+    `INSERT INTO habits (title, category, current_target, unit, increment_rate, base_target, streak, max_goal_integer, reminder_time) 
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
     [
       habit.title,
       habit.category,
@@ -15,8 +16,37 @@ export const addHabit = (habit: Omit<Habit, 'id' | 'streak'>) => {
       habit.unit,
       habit.increment_rate,
       habit.base_target,
+      habit.max_goal_integer,
+      habit.reminder_time,
     ]
   );
+  
+  if (habit.reminder_time && result.lastInsertRowId) {
+    scheduleHabitReminder(result.lastInsertRowId, habit.reminder_time);
+  }
+};
+
+export const updateHabit = (habit: Habit) => {
+  if (!habit.id) return;
+
+  db.runSync(
+    `UPDATE habits SET title=?, current_target=?, unit=?, base_target=?, max_goal_integer=?, reminder_time=? WHERE id=?`,
+    [
+      habit.title,
+      habit.current_target,
+      habit.unit,
+      habit.base_target,
+      habit.max_goal_integer,
+      habit.reminder_time,
+      habit.id
+    ]
+  );
+
+  if (habit.reminder_time) {
+    scheduleHabitReminder(habit.id, habit.reminder_time);
+  } else {
+    cancelScheduledNotificationAsync(`habit-reminder-${habit.id}`);
+  }
 };
 
 export const completeHabit = (habit: Habit, valueAchieved: number, notes: string = '') => {
@@ -27,12 +57,20 @@ export const completeHabit = (habit: Habit, valueAchieved: number, notes: string
     [habit.id!, today, valueAchieved, notes]
   );
 
-  const nextTarget = Number((habit.current_target * (1 + habit.increment_rate)).toFixed(2));
+  // Integer-only rounding (Math.ceil guarantees at least +1 integer step)
+  const rawNext = habit.current_target * (1 + habit.increment_rate);
+  let nextTargetInteger = Math.ceil(rawNext);
+
+  // Goal ceiling check
+  if (nextTargetInteger > habit.max_goal_integer) {
+    nextTargetInteger = habit.max_goal_integer;
+  }
+
   const newStreak = habit.streak + 1;
 
   db.runSync(
     `UPDATE habits SET current_target = ?, streak = ? WHERE id = ?`,
-    [nextTarget, newStreak, habit.id]
+    [nextTargetInteger, newStreak, habit.id]
   );
 };
 
@@ -43,7 +81,6 @@ export const resetToBaseline = (habit: Habit) => {
   );
 };
 
-// Calculates the "Successful Man" daily score (0 - 100%)
 export const calculateDailyScore = (dateStr: string): number => {
   const habits = getHabits();
   if (habits.length === 0) return 0;
@@ -59,23 +96,19 @@ export const calculateDailyScore = (dateStr: string): number => {
   );
 
   let score = 0;
-  // Habit completion accounts for 50% of the score
   const habitRatio = Math.min(logs.length / habits.length, 1);
   score += habitRatio * 50;
 
-  // Morning intentions / Non-negotiables account for 25%
   if (journal?.morning_gratitude && journal?.daily_non_negotiable) {
     score += 25;
   }
 
-  // Evening audit / Unforgiving honesty accounts for 25%
   if (journal?.evening_win && journal?.greenlight_moment) {
     score += 25;
   }
 
   return Math.round(score);
 };
-// Add to the bottom of services/habitEngine.ts
 
 export const getWeeklyCompletionStats = (): { dayLabel: string; count: number; date: string }[] => {
   const stats = [];

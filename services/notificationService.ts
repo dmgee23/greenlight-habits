@@ -1,70 +1,121 @@
-import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+// services/notificationService.ts
 
-// Configure how notifications appear when the app is open
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Fallback logic for when the native module is missing (Expo Go Android)
+const notificationsFallback = {
+  isAvailable: false,
+  getPermissionsAsync: async () => ({ status: 'undetermined' }),
+  requestPermissionsAsync: async () => ({ status: 'undetermined' }),
+  setNotificationChannelAsync: async () => {},
+  schedulingRequestAsync: async () => {},
+  setNotificationHandler: () => {},
+  cancelScheduledNotificationAsync: async () => {},
+};
 
-export async function registerForPushNotificationsAsync() {
-  let token;
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
+// Start with fallback to prevent boot crashes
+let safeNotifications: any = notificationsFallback;
+let safeAndroidImportance: any = { MAX: 4 }; // Default MAX value
 
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
+// Attempt dynamic require to avoid top-level load errors in Expo Go
+try {
+  // Use CommonJS require to avoid static import crashes
+  const notificationsModule = require('expo-notifications');
+  safeNotifications = notificationsModule;
+  safeNotifications.isAvailable = true; // Flag for internal use
+  safeAndroidImportance = notificationsModule.AndroidImportance;
+} catch (e) {
+  console.warn('Expo Notifications Native Module failed to load. Falling back. Behavioral cues disabled for Alpha.', e);
+}
 
-  if (finalStatus !== 'granted') {
-    alert('Failed to get push token for push notification!');
-    return;
-  }
+// Map the DAILY SchedulableTriggerInputType constant (DAILY = 1)
+const DAILY_TRIGGER_TYPE = 1;
 
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#22c55e',
+// Set up the Safe Notification Handler (if available)
+if (safeNotifications.isAvailable) {
+  try {
+    safeNotifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
     });
+  } catch (e) {
+    console.warn('Set notification handler failed.', e);
   }
 }
 
-// Schedule daily morning intention prompt (e.g., 7:30 AM)
-export async function scheduleMorningReminder() {
-  await Notifications.cancelAllScheduledNotificationsAsync();
+// Global cues for journal prompts (Checkpoint 2)
+const journalCues = {
+  morningHour: 7, morningMinute: 30, morningId: 'morning-prompt',
+  eveningHour: 21, eveningMinute: 0, eveningId: 'evening-prompt'
+};
 
-  await Notifications.schedulingRequestAsync({
-    content: {
-      title: "☀️ Morning Intentions",
-      body: "Set your daily non-negotiable and gratitude before the day takes over.",
-      sound: true,
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour: 7,
-      minute: 30,
-    },
-  });
+// Safe cancellation wrapper (added)
+export async function cancelScheduledNotificationAsync(identifier: string) {
+    if (!safeNotifications.isAvailable) return;
+    try {
+        await safeNotifications.cancelScheduledNotificationAsync(identifier);
+    } catch (e) {
+        console.warn(`Error cancelling notification ${identifier}:`, e);
+    }
 }
 
-// Schedule daily evening audit prompt (e.g., 9:00 PM)
+// Generic daily reminder scheduler
+async function scheduleDailyReminder(id: string, hour: number, minute: number, title: string, body: string) {
+  if (!safeNotifications.isAvailable) return;
+
+  // Use the unique identifier (Checkpoint 2)
+  await cancelScheduledNotificationAsync(id);
+
+  try {
+    await safeNotifications.schedulingRequestAsync({
+      content: {
+        title: title,
+        body: body,
+        sound: true,
+      },
+      trigger: {
+        type: DAILY_TRIGGER_TYPE, // Use our mapped constant value
+        hour: hour,
+        minute: minute,
+      },
+      identifier: id, // Vital for management
+    });
+  } catch (e) {
+    console.warn(`Error scheduling reminder ${id}:`, e);
+  }
+}
+
+// Simplified cue logic using our generic scheduler
+export async function scheduleMorningReminder() {
+  await scheduleDailyReminder(
+    journalCues.morningId, journalCues.morningHour, journalCues.morningMinute, 
+    "☀️ Morning Intentions", "Set your daily non-negotiable and gratitude.");
+}
+
 export async function scheduleEveningReminder() {
-  await Notifications.schedulingRequestAsync({
-    content: {
-      title: "🌙 Evening Audit & Greenlights",
-      body: "Time for unforgiving honesty. What was your win and greenlight today?",
-      sound: true,
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour: 21,
-      minute: 0,
-    },
-  });
+  await scheduleDailyReminder(
+    journalCues.eveningId, journalCues.eveningHour, journalCues.eveningMinute, 
+    "🌙 Evening Audit & Greenlights", "Log your win and greenlight before the day ends.");
+}
+
+
+// NEW DYNAMIC PER-HABIT SCHEDULER (STEP 2 Design Spec)
+export async function scheduleHabitReminder(habitId: number | string, timeStr: string) {
+  if (!safeNotifications.isAvailable || !timeStr) return;
+
+  // Personalized logic: unique identifier per habit
+  const uniqueId = `habit-reminder-${habitId}`;
+
+  // Time spec parsing
+  const parts = timeStr.split(':');
+  if (parts.length !== 2) return;
+  const hour = parseInt(parts[0], 10);
+  const minute = parseInt(parts[1], 10);
+  if (isNaN(hour) || isNaN(minute)) return;
+
+  await scheduleDailyReminder(
+    uniqueId, hour, minute,
+    "🔥 personalized Micro-Habit Cue", "Your micro-habit routine needs execution. Move greenlights!"
+  );
 }

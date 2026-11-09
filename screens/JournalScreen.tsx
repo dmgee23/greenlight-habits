@@ -1,172 +1,147 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, Linking } from 'react-native';
 import { db } from '../db/schema';
-import { exportToObsidianViaURI } from '../services/obsidianExport';
 import { calculateDailyScore } from '../services/habitEngine';
 
 export default function JournalScreen() {
-  const [activeTab, setActiveTab] = useState<'morning' | 'evening'>('morning');
-  const [dailyScore, setDailyScore] = useState(0);
-
-  // Morning Fields
-  const [gratitude, setGratitude] = useState('');
-  const [nonNegotiable, setNonNegotiable] = useState('');
-  const [affirmation, setAffirmation] = useState('');
-
-  // Evening Fields
-  const [win, setWin] = useState('');
-  const [greenlight, setGreenlight] = useState('');
-  const [honestyReflection, setHonestyReflection] = useState('');
-
   const today = new Date().toISOString().split('T')[0];
 
+  const [morningGratitude, setMorningGratitude] = useState('');
+  const [dailyNonNegotiable, setDailyNonNegotiable] = useState('');
+  const [identityAffirmation, setIdentityAffirmation] = useState('');
+  
+  const [eveningWin, setEveningWin] = useState('');
+  const [greenlightMoment, setGreenlightMoment] = useState('');
+  const [unforgivingHonesty, setUnforgivingHonesty] = useState('');
+
   useEffect(() => {
-    loadExistingJournal();
+    loadJournal();
   }, []);
 
-  const loadExistingJournal = () => {
-    const existing = db.getFirstSync<any>(
+  const loadJournal = () => {
+    const entry = db.getFirstSync<any>(
       `SELECT * FROM journal_entries WHERE date = ?`,
       [today]
     );
-    if (existing) {
-      setGratitude(existing.morning_gratitude || '');
-      setNonNegotiable(existing.daily_non_negotiable || '');
-      setAffirmation(existing.identity_affirmation || '');
-      setWin(existing.evening_win || '');
-      setGreenlight(existing.greenlight_moment || '');
-      setHonestyReflection(existing.unforgiving_honesty_reflection || '');
+    if (entry) {
+      setMorningGratitude(entry.morning_gratitude || '');
+      setDailyNonNegotiable(entry.daily_non_negotiable || '');
+      setIdentityAffirmation(entry.identity_affirmation || '');
+      setEveningWin(entry.evening_win || '');
+      setGreenlightMoment(entry.greenlight_moment || '');
+      setUnforgivingHonesty(entry.unforgiving_honesty_reflection || '');
     }
-    setDailyScore(calculateDailyScore(today));
   };
 
-  const saveJournal = () => {
+  const handleSaveJournal = () => {
     db.runSync(
-      `INSERT INTO journal_entries 
-        (date, morning_gratitude, daily_non_negotiable, identity_affirmation, evening_win, greenlight_moment, unforgiving_honesty_reflection)
+      `INSERT INTO journal_entries (date, morning_gratitude, daily_non_negotiable, identity_affirmation, evening_win, greenlight_moment, unforgiving_honesty_reflection)
        VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(date) DO UPDATE SET
-        morning_gratitude=COALESCE(EXCLUDED.morning_gratitude, morning_gratitude),
-        daily_non_negotiable=COALESCE(EXCLUDED.daily_non_negotiable, daily_non_negotiable),
-        identity_affirmation=COALESCE(EXCLUDED.identity_affirmation, identity_affirmation),
-        evening_win=COALESCE(EXCLUDED.evening_win, evening_win),
-        greenlight_moment=COALESCE(EXCLUDED.greenlight_moment, greenlight_moment),
-        unforgiving_honesty_reflection=COALESCE(EXCLUDED.unforgiving_honesty_reflection, unforgiving_honesty_reflection);`,
-      [today, gratitude, nonNegotiable, affirmation, win, greenlight, honestyReflection]
+         morning_gratitude = excluded.morning_gratitude,
+         daily_non_negotiable = excluded.daily_non_negotiable,
+         identity_affirmation = excluded.identity_affirmation,
+         evening_win = excluded.evening_win,
+         greenlight_moment = excluded.greenlight_moment,
+         unforgiving_honesty_reflection = excluded.unforgiving_honesty_reflection`,
+      [today, morningGratitude, dailyNonNegotiable, identityAffirmation, eveningWin, greenlightMoment, unforgivingHonesty]
     );
-
-    setDailyScore(calculateDailyScore(today));
-    Alert.alert('Journal Saved', 'Your entries and daily score have been updated.');
+    Alert.alert('Saved', 'Journal entries saved for today!');
   };
 
-  // Gated Check: Requires both morning & evening complete
-  const handleObsidianExport = async () => {
-    const isMorningComplete = gratitude.trim() !== '' && nonNegotiable.trim() !== '';
-    const isEveningComplete = win.trim() !== '' && greenlight.trim() !== '';
-
-    if (!isMorningComplete || !isEveningComplete) {
-      Alert.alert(
-        'Export Locked 🔒',
-        'To export to Obsidian, you must complete both your Morning Intentions and Evening Audit.'
-      );
+  const handleExportToObsidian = async () => {
+    // Enforce the design rule: Gated export requiring both morning & evening logs
+    if (!morningGratitude || !dailyNonNegotiable || !eveningWin || !greenlightMoment) {
+      Alert.alert('Incomplete Journal', 'Please fill out both your Morning Intentions and Evening Audit before exporting to Obsidian.');
       return;
     }
 
-    const content = `---
-date: ${today}
-score: ${dailyScore}%
-tags: [greenlight, successful-man]
----
-# ☀️ Morning Intentions
-- **Gratitude:** ${gratitude}
-- **Non-Negotiable:** ${nonNegotiable}
-- **Identity:** ${affirmation}
+    handleSaveJournal();
+    const score = calculateDailyScore(today);
 
-# 🌙 Evening Audit & Greenlight Ledger
-- **Daily Win:** ${win}
-- **Greenlight Moment:** ${greenlight}
-- **Unforgiving Honesty Audit:** 
-> ${honestyReflection}
+    // Construct clean Markdown formatting combining Greenlights & Bartlett frameworks
+    const markdownContent = `# Daily Journal: ${today}
+
+## 📊 Daily Success Score: ${score}%
+
+### ☀️ Morning Intentions
+- **Gratitude:** ${morningGratitude}
+- **Daily Non-Negotiable:** ${dailyNonNegotiable}
+- **Identity Affirmation:** ${identityAffirmation}
+
+### 🌙 Evening Audit & Greenlights
+- **Evening Win:** ${eveningWin}
+- **Greenlight Moment:** ${greenlightMoment}
+- **Unforgiving Honesty / Friction Review:** ${unforgivingHonesty}
+
+---
+*Generated via Greenlight Habits App*
 `;
 
-    await exportToObsidianViaURI('YourVaultName', today, content);
+    // Format deep link for Obsidian Advanced URI
+    const vaultName = 'Default'; // Change to your exact Obsidian vault name if needed
+    const fileName = `Journal_${today}`;
+    const encodedContent = encodeURIComponent(markdownContent);
+    const obsidianUrl = `obsidian://advanced-uri?vault=${vaultName}&filepath=Journal%2F${fileName}&data=${encodedContent}&mode=overwrite`;
+
+    try {
+      const supported = await Linking.canOpenURL(obsidianUrl);
+      if (supported) {
+        await Linking.openURL(obsidianUrl);
+        Alert.alert('Exported!', 'Successfully sent to your Obsidian vault.');
+      } else {
+        Alert.alert('Obsidian Error', 'Could not reach Obsidian via deep link. Ensure Obsidian is installed on your S24+.');
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Failed to trigger Obsidian export.');
+    }
   };
 
   return (
     <ScrollView style={styles.container}>
-      {/* Score Dashboard Card */}
-      <View style={styles.scoreCard}>
-        <Text style={styles.scoreTitle}>🏆 Successful Man Score</Text>
-        <Text style={styles.scoreNumber}>{dailyScore}%</Text>
-        <Text style={styles.scoreSub}>
-          {dailyScore === 100 ? 'Mastery Unlocked. Ready for Obsidian!' : 'Complete habits & both journal tabs to reach 100%'}
-        </Text>
-      </View>
+      <Text style={styles.sectionHeader}>☀️ Morning Intentions</Text>
+      <Text style={styles.label}>Morning Gratitude</Text>
+      <TextInput style={styles.input} value={morningGratitude} onChangeText={setMorningGratitude} placeholder="What are you grateful for today?" placeholderTextColor="#64748b" />
 
-      <View style={styles.tabContainer}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'morning' && styles.activeTab]} 
-          onPress={() => setActiveTab('morning')}>
-          <Text style={styles.tabText}>☀️ Morning Intentions</Text>
+      <Text style={styles.label}>Daily Non-Negotiable</Text>
+      <TextInput style={styles.input} value={dailyNonNegotiable} onChangeText={setDailyNonNegotiable} placeholder="What must get done today?" placeholderTextColor="#64748b" />
+
+      <Text style={styles.label}>Identity Affirmation</Text>
+      <TextInput style={styles.input} value={identityAffirmation} onChangeText={setIdentityAffirmation} placeholder="Who are you choosing to be today?" placeholderTextColor="#64748b" />
+
+      <Text style={[styles.sectionHeader, { marginTop: 24 }]}>🌙 Evening Audit & Greenlights</Text>
+      <Text style={styles.label}>Evening Win</Text>
+      <TextInput style={styles.input} value={eveningWin} onChangeText={setEveningWin} placeholder="What was your primary win today?" placeholderTextColor="#64748b" />
+
+      <Text style={styles.label}>Greenlight Moment</Text>
+      <TextInput style={styles.input} value={greenlightMoment} onChangeText={setGreenlightMoment} placeholder="Where did life turn a yellow light green?" placeholderTextColor="#64748b" />
+
+      <Text style={styles.label}>Unforgiving Honesty / Reflection</Text>
+      <TextInput style={[styles.input, { height: 80 }]} multiline value={unforgivingHonesty} onChangeText={setUnforgivingHonesty} placeholder="Where did you create friction or avoid truth?" placeholderTextColor="#64748b" />
+
+      <View style={styles.buttonRow}>
+        <TouchableOpacity style={styles.saveBtn} onPress={handleSaveJournal}>
+          <Text style={styles.saveBtnText}>Save Journal</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'evening' && styles.activeTab]} 
-          onPress={() => setActiveTab('evening')}>
-          <Text style={styles.tabText}>🌙 Evening Audit</Text>
+
+        <TouchableOpacity style={styles.exportBtn} onPress={handleExportToObsidian}>
+          <Text style={styles.exportBtnText}>Export to Obsidian 🚀</Text>
         </TouchableOpacity>
       </View>
-
-      {activeTab === 'morning' ? (
-        <View style={styles.formSection}>
-          <Text style={styles.label}>1. What am I grateful for?</Text>
-          <TextInput style={styles.input} value={gratitude} onChangeText={setGratitude} placeholder="3 quick things..." placeholderTextColor="#64748b" />
-
-          <Text style={styles.label}>2. The #1 Non-Negotiable Goal</Text>
-          <TextInput style={styles.input} value={nonNegotiable} onChangeText={setNonNegotiable} placeholder="Must get done today..." placeholderTextColor="#64748b" />
-
-          <Text style={styles.label}>3. Identity Affirmation</Text>
-          <TextInput style={styles.input} value={affirmation} onChangeText={setAffirmation} placeholder="I am the type of person who..." placeholderTextColor="#64748b" />
-        </View>
-      ) : (
-        <View style={styles.formSection}>
-          <Text style={styles.label}>1. Today's Big Win</Text>
-          <TextInput style={styles.input} value={win} onChangeText={setWin} placeholder="What went well?" placeholderTextColor="#64748b" />
-
-          <Text style={styles.label}>2. Greenlight Moment</Text>
-          <TextInput style={styles.input} value={greenlight} onChangeText={setGreenlight} placeholder="Turned an obstacle into progress..." placeholderTextColor="#64748b" />
-
-          <Text style={styles.label}>3. Unforgiving Honesty Audit</Text>
-          <TextInput style={[styles.input, styles.textArea]} value={honestyReflection} onChangeText={setHonestyReflection} multiline placeholder="Where did friction catch me?" placeholderTextColor="#64748b" />
-        </View>
-      )}
-
-      <TouchableOpacity style={styles.saveButton} onPress={saveJournal}>
-        <Text style={styles.saveButtonText}>Save Entry & Update Score</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.exportButton} onPress={handleObsidianExport}>
-        <Text style={styles.exportButtonText}>Export to Obsidian 📦 (Gated)</Text>
-      </TouchableOpacity>
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a', padding: 16 },
-  scoreCard: { backgroundColor: '#1e293b', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
-  scoreTitle: { fontSize: 14, color: '#94a3b8', fontWeight: '600' },
-  scoreNumber: { fontSize: 36, fontWeight: 'bold', color: '#22c55e', marginVertical: 4 },
-  scoreSub: { fontSize: 12, color: '#64748b', textAlign: 'center' },
-  tabContainer: { flexDirection: 'row', marginBottom: 20, backgroundColor: '#1e293b', borderRadius: 8, padding: 4 },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 6 },
-  activeTab: { backgroundColor: '#334155' },
-  tabText: { color: '#f8fafc', fontWeight: '600' },
-  formSection: { gap: 16 },
-  label: { color: '#cbd5e1', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  input: { backgroundColor: '#1e293b', color: '#f8fafc', borderRadius: 8, padding: 12, fontSize: 15 },
-  textArea: { height: 100, textAlignVertical: 'top' },
-  saveButton: { backgroundColor: '#22c55e', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 24 },
-  saveButtonText: { color: '#0f172a', fontWeight: 'bold', fontSize: 16 },
-  exportButton: { backgroundColor: '#3b82f6', padding: 16, borderRadius: 8, alignItems: 'center', marginTop: 12, marginBottom: 40 },
-  exportButtonText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 16 },
+  container: { flex: 1, backgroundColor: '#0f172a' },
+  sectionHeader: { fontSize: 18, fontWeight: 'bold', color: '#38bdf8', marginBottom: 12 },
+  label: { color: '#cbd5e1', fontSize: 14, fontWeight: '600', marginBottom: 4, marginTop: 8 },
+  input: { backgroundColor: '#1e293b', color: '#f8fafc', borderRadius: 8, padding: 12, fontSize: 15, borderWidth: 1, borderColor: '#334155' },
+  buttonRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  saveBtn: { flex: 1, backgroundColor: '#334155', padding: 14, borderRadius: 8, alignItems: 'center' },
+  saveBtnText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 14 },
+  exportBtn: { flex: 1, backgroundColor: '#22c55e', padding: 14, borderRadius: 8, alignItems: 'center' },
+  exportBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 14 },
 });

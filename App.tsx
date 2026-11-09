@@ -1,40 +1,37 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, Alert, TextInput, Modal } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, Alert, TextInput, Modal, Platform } from 'react-native';
 import { initDatabase, Habit } from './db/schema';
-import { getHabits, addHabit, completeHabit, resetToBaseline, calculateDailyScore, getWeeklyCompletionStats } from './services/habitEngine';
+import { getHabits, addHabit, updateHabit, completeHabit, resetToBaseline, calculateDailyScore, getWeeklyCompletionStats } from './services/habitEngine';
 import JournalScreen from './screens/JournalScreen';
-// Add these imports to the top of App.tsx
 import { registerForPushNotificationsAsync, scheduleMorningReminder, scheduleEveningReminder } from './services/notificationService';
-
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'habits' | 'journal'>('habits');
   const [habits, setHabits] = useState<Habit[]>([]);
   const [weeklyStats, setWeeklyStats] = useState<{ dayLabel: string; count: number; date: string }[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  
+  // Modal form states & editing tracker
+  const [editingHabitId, setEditingHabitId] = useState<number | null>(null);
   const [newTitle, setNewTitle] = useState('');
-  const [newUnit, setNewUnit] = useState('minutes');
-  const [newTarget, setNewTarget] = useState('2');
+  const [newUnit, setNewUnit] = useState('pages');
+  const [newTargetInteger, setNewTargetInteger] = useState('2'); 
+  const [newMaxGoalInteger, setNewMaxGoalInteger] = useState('25');
+  const [newReminderTime, setNewReminderTime] = useState('18:30');
 
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
-    // Inside your main App component's useEffect, add:
-  useEffect(() => {
     try {
       initDatabase();
       loadData();
-      // Register and schedule daily behavioral cues
-      registerForPushNotificationsAsync().then(() => {
+      registerForPushNotificationsAsync(Platform.OS).then(() => {
         scheduleMorningReminder();
         scheduleEveningReminder();
       });
     } catch (e) {
       console.error('Initialization error:', e);
     }
-  }, []);
-    initDatabase();
-    loadData();
   }, []);
 
   const loadData = () => {
@@ -43,10 +40,12 @@ export default function App() {
       addHabit({
         title: 'Read Books',
         category: 'Intellectual',
-        current_target: 2.0,
+        current_target: 2,
         unit: 'pages',
         increment_rate: 0.01,
-        base_target: 2.0,
+        base_target: 2,
+        max_goal_integer: 25,
+        reminder_time: "07:30",
       });
       currentHabits = getHabits();
     }
@@ -54,34 +53,76 @@ export default function App() {
     setWeeklyStats(getWeeklyCompletionStats());
   };
 
+  const openAddModal = () => {
+    setEditingHabitId(null);
+    setNewTitle('');
+    setNewUnit('pages');
+    setNewTargetInteger('2');
+    setNewMaxGoalInteger('25');
+    setNewReminderTime('18:30');
+    setModalVisible(true);
+  };
+
+  const openEditModal = (habit: Habit) => {
+    setEditingHabitId(habit.id!);
+    setNewTitle(habit.title);
+    setNewUnit(habit.unit);
+    setNewTargetInteger(habit.base_target.toString());
+    setNewMaxGoalInteger(habit.max_goal_integer.toString());
+    setNewReminderTime(habit.reminder_time || '18:30');
+    setModalVisible(true);
+  };
+
+  const handleSaveHabit = () => {
+    if (!newTitle.trim()) {
+      Alert.alert('Error', 'Please enter a habit title.');
+      return;
+    }
+    const baseNum = parseInt(newTargetInteger, 10) || 2;
+    const maxGoalNum = parseInt(newMaxGoalInteger, 10) || 25;
+
+    if (editingHabitId !== null) {
+      // Edit existing habit
+      const existing = habits.find(h => h.id === editingHabitId);
+      if (existing) {
+        updateHabit({
+          ...existing,
+          title: newTitle,
+          unit: newUnit,
+          base_target: baseNum,
+          max_goal_integer: maxGoalNum,
+          reminder_time: newReminderTime,
+        });
+        Alert.alert('Success', 'Habit updated successfully!');
+      }
+    } else {
+      // Create new habit
+      addHabit({
+        title: newTitle,
+        category: 'General',
+        current_target: baseNum,
+        unit: newUnit,
+        increment_rate: 0.01,
+        base_target: baseNum,
+        max_goal_integer: maxGoalNum,
+        reminder_time: newReminderTime,
+      });
+      Alert.alert('Success', 'New micro-habit created!');
+    }
+
+    setModalVisible(false);
+    loadData();
+  };
+
   const handleComplete = (habit: Habit) => {
     completeHabit(habit, habit.current_target, 'Logged from main view');
-    Alert.alert('Greenlight!', `Target increased by ${(habit.increment_rate * 100).toFixed(1)}% for tomorrow.`);
+    Alert.alert('Greenlight!', 'Target increased for tomorrow!');
     loadData();
   };
 
   const handleRedLightReset = (habit: Habit) => {
     resetToBaseline(habit);
-    Alert.alert('Friction Reduced', 'Habit target reset to frictionless baseline.');
-    loadData();
-  };
-
-  const handleAddHabit = () => {
-    if (!newTitle.trim()) {
-      Alert.alert('Error', 'Please enter a habit title.');
-      return;
-    }
-    const baseNum = parseFloat(newTarget) || 2.0;
-    addHabit({
-      title: newTitle,
-      category: 'General',
-      current_target: baseNum,
-      unit: newUnit,
-      increment_rate: 0.01,
-      base_target: baseNum,
-    });
-    setNewTitle('');
-    setModalVisible(false);
+    Alert.alert('Friction Reduced', 'Habit target reset to baseline.');
     loadData();
   };
 
@@ -94,12 +135,12 @@ export default function App() {
           <Text style={styles.title}>Greenlight Habits</Text>
           <Text style={styles.subtitle}>Daily Score: <Text style={styles.scoreHighlight}>{score}%</Text></Text>
         </View>
-        <TouchableOpacity style={styles.addBtnHeader} onPress={() => setModalVisible(true)}>
+        <TouchableOpacity style={styles.addBtnHeader} onPress={openAddModal}>
           <Text style={styles.addBtnText}>+ Add Habit</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Checkpoint 1: Weekly Consistency Heatmap */}
+      {/* Heatmap Card */}
       <View style={styles.heatmapCard}>
         <Text style={styles.heatmapTitle}>📊 Past 7 Days Consistency</Text>
         <View style={styles.heatmapRow}>
@@ -138,17 +179,27 @@ export default function App() {
           renderItem={({ item }) => (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
-                <Text style={styles.habitTitle}>{item.title}</Text>
-                <Text style={styles.streakBadge}>🔥 {item.streak}d streak</Text>
+                <View>
+                  <Text style={styles.habitTitle}>{item.title}</Text>
+                  <Text style={styles.cueBadge}>🔔 Cue Time: {item.reminder_time || 'None'}</Text>
+                </View>
+                <TouchableOpacity style={styles.editCardBtn} onPress={() => openEditModal(item)}>
+                  <Text style={styles.editCardText}>Edit</Text>
+                </TouchableOpacity>
               </View>
 
               <Text style={styles.targetText}>
                 Today's Target: <Text style={styles.highlight}>{item.current_target} {item.unit}</Text>
               </Text>
+              
+              <View style={styles.cardSubRow}>
+                <Text style={styles.goalSub}>Max Goal Limit: {item.max_goal_integer} {item.unit}</Text>
+                <Text style={styles.streakBadge}>🔥 {item.streak}d streak</Text>
+              </View>
 
               <View style={styles.actionRow}>
                 <TouchableOpacity style={styles.completeBtn} onPress={() => handleComplete(item)}>
-                  <Text style={styles.btnText}>Complete (+1%)</Text>
+                  <Text style={styles.btnText}>Complete</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.resetBtn} onPress={() => handleRedLightReset(item)}>
@@ -162,27 +213,65 @@ export default function App() {
         <JournalScreen />
       )}
 
-      {/* Add Habit Modal */}
+      {/* Add / Edit Habit Modal */}
       <Modal visible={modalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add New Micro-Habit</Text>
+            <Text style={styles.modalTitle}>{editingHabitId !== null ? 'Edit Micro-Habit' : 'Add Micro-Habit'}</Text>
             
             <Text style={styles.label}>Habit Name</Text>
-            <TextInput style={styles.input} value={newTitle} onChangeText={setNewTitle} placeholder="e.g., Meditate, Push-ups" placeholderTextColor="#64748b" />
+            <TextInput 
+              style={styles.input} 
+              value={newTitle} 
+              onChangeText={setNewTitle} 
+              placeholder="e.g., Read Books" 
+              placeholderTextColor="#64748b" 
+            />
 
-            <Text style={styles.label}>Starting Target (Frictionless)</Text>
-            <TextInput style={styles.input} value={newTarget} onChangeText={setNewTarget} keyboardType="numeric" placeholder="2" placeholderTextColor="#64748b" />
+            <Text style={styles.label}>Starting Target (Integer Baseline)</Text>
+            <TextInput 
+              style={styles.input} 
+              value={newTargetInteger} 
+              onChangeText={setNewTargetInteger} 
+              keyboardType="numeric" 
+              placeholder="e.g., 2" 
+              placeholderTextColor="#64748b" 
+            />
 
             <Text style={styles.label}>Unit</Text>
-            <TextInput style={styles.input} value={newUnit} onChangeText={setNewUnit} placeholder="minutes, pages, reps" placeholderTextColor="#64748b" />
+            <TextInput 
+              style={styles.input} 
+              value={newUnit} 
+              onChangeText={setNewUnit} 
+              placeholder="e.g., pages, mins" 
+              placeholderTextColor="#64748b" 
+            />
+
+            <Text style={styles.label}>Max Goal Ceiling</Text>
+            <TextInput 
+              style={styles.input} 
+              value={newMaxGoalInteger} 
+              onChangeText={setNewMaxGoalInteger} 
+              keyboardType="numeric" 
+              placeholder="e.g., 25" 
+              placeholderTextColor="#64748b" 
+            />
+
+            <Text style={styles.label}>Daily Reminder Cue (HH:MM)</Text>
+            <TextInput 
+              style={styles.input} 
+              value={newReminderTime} 
+              onChangeText={setNewReminderTime} 
+              placeholder="e.g., 18:30" 
+              placeholderTextColor="#64748b" 
+            />
 
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.saveModalBtn} onPress={handleAddHabit}>
-                <Text style={styles.saveModalText}>Create Habit</Text>
+              <TouchableOpacity style={styles.saveModalBtn} onPress={handleSaveHabit}>
+                <Text style={styles.saveModalText}>{editingHabitId !== null ? 'Save Changes' : 'Create Habit'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -213,8 +302,13 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#1e293b', borderRadius: 12, padding: 16, marginBottom: 16 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   habitTitle: { fontSize: 20, fontWeight: '600', color: '#f8fafc' },
+  cueBadge: { fontSize: 12, color: '#94a3b8', marginTop: 4, fontWeight: '500' },
+  editCardBtn: { backgroundColor: '#334155', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  editCardText: { color: '#38bdf8', fontSize: 12, fontWeight: '600' },
   streakBadge: { fontSize: 14, color: '#f59e0b', fontWeight: '500' },
-  targetText: { fontSize: 16, color: '#cbd5e1', marginVertical: 12 },
+  targetText: { fontSize: 16, color: '#cbd5e1', marginTop: 12 },
+  cardSubRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  goalSub: { fontSize: 12, color: '#64748b', fontWeight: '500' },
   highlight: { fontWeight: 'bold', color: '#22c55e' },
   actionRow: { flexDirection: 'row', gap: 8 },
   completeBtn: { flex: 1, backgroundColor: '#22c55e', padding: 12, borderRadius: 8, alignItems: 'center' },
