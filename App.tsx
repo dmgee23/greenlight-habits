@@ -1,11 +1,58 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, SafeAreaView, Alert, TextInput, Modal, Platform } from 'react-native';
-import { initDatabase, Habit } from './db/schema';
-import { getHabits, addHabit, updateHabit, completeHabit, resetToBaseline, calculateDailyScore, getWeeklyCompletionStats } from './services/habitEngine';
-import JournalScreen from './screens/JournalScreen';
-import { registerForPushNotificationsAsync, scheduleMorningReminder, scheduleEveningReminder } from './services/notificationService';
+import { 
+  StyleSheet, 
+  Text, 
+  View, 
+  ActivityIndicator, 
+  FlatList, 
+  TouchableOpacity, 
+  Modal, 
+  TextInput, 
+  Alert, 
+  SafeAreaView, 
+  Platform 
+} from 'react-native';
+import { initializeDatabase } from './db/schema';
+import AppNavigator from './navigation/AppNavigator'; // Keep if you use a separate navigator file
+
+// ----------------------------------------------------------------------
+// MOCK OR IMPORTED DATABASE HELPERS & INTERFACES (Adjust as per your project)
+// ----------------------------------------------------------------------
+interface Habit {
+  id?: number;
+  title: string;
+  category: string;
+  current_target: number;
+  unit: string;
+  increment_rate: number;
+  base_target: number;
+  max_goal_integer: number;
+  reminder_time?: string;
+  streak?: number;
+}
+
+// Ensure these match your actual implementation or database service file
+import { 
+  initDatabase, 
+  getHabits, 
+  addHabit, 
+  updateHabit, 
+  completeHabit, 
+  resetToBaseline, 
+  calculateDailyScore, 
+  getWeeklyCompletionStats, 
+  registerForPushNotificationsAsync, 
+  scheduleMorningReminder, 
+  scheduleEveningReminder 
+} from './db/database'; // Adjust path to your database helper file
+
+import JournalScreen from './screens/JournalScreen'; // Adjust path if necessary
 
 export default function App() {
+  const [isDbReady, setIsDbReady] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
+
+  // App UI state
   const [currentTab, setCurrentTab] = useState<'habits' | 'journal'>('habits');
   const [habits, setHabits] = useState<Habit[]>([]);
   const [weeklyStats, setWeeklyStats] = useState<{ dayLabel: string; count: number; date: string }[]>([]);
@@ -21,36 +68,52 @@ export default function App() {
 
   const today = new Date().toISOString().split('T')[0];
 
+  // 1. Initial Database Setup & Migration Guard
   useEffect(() => {
     try {
+      // Create schema tables first
+      initializeDatabase();
+      
+      // Initialize operational database queries
       initDatabase();
       loadData();
+      
+      // Register notifications safely
       registerForPushNotificationsAsync(Platform.OS).then(() => {
         scheduleMorningReminder();
         scheduleEveningReminder();
+      }).catch((notifErr) => {
+        console.warn('Notifications setup warning:', notifErr);
       });
-    } catch (e) {
+
+      setIsDbReady(true);
+    } catch (e: any) {
       console.error('Initialization error:', e);
+      setDbError(e?.message || 'Unknown database initialization error');
     }
   }, []);
 
   const loadData = () => {
-    let currentHabits = getHabits();
-    if (currentHabits.length === 0) {
-      addHabit({
-        title: 'Read Books',
-        category: 'Intellectual',
-        current_target: 2,
-        unit: 'pages',
-        increment_rate: 0.01,
-        base_target: 2,
-        max_goal_integer: 25,
-        reminder_time: "07:30",
-      });
-      currentHabits = getHabits();
+    try {
+      let currentHabits = getHabits();
+      if (currentHabits.length === 0) {
+        addHabit({
+          title: 'Read Books',
+          category: 'Intellectual',
+          current_target: 2,
+          unit: 'pages',
+          increment_rate: 0.01,
+          base_target: 2,
+          max_goal_integer: 25,
+          reminder_time: "07:30",
+        });
+        currentHabits = getHabits();
+      }
+      setHabits(currentHabits);
+      setWeeklyStats(getWeeklyCompletionStats());
+    } catch (loadErr) {
+      console.error('Error loading data from SQLite:', loadErr);
     }
-    setHabits(currentHabits);
-    setWeeklyStats(getWeeklyCompletionStats());
   };
 
   const openAddModal = () => {
@@ -82,7 +145,6 @@ export default function App() {
     const maxGoalNum = parseInt(newMaxGoalInteger, 10) || 25;
 
     if (editingHabitId !== null) {
-      // Edit existing habit
       const existing = habits.find(h => h.id === editingHabitId);
       if (existing) {
         updateHabit({
@@ -96,7 +158,6 @@ export default function App() {
         Alert.alert('Success', 'Habit updated successfully!');
       }
     } else {
-      // Create new habit
       addHabit({
         title: newTitle,
         category: 'General',
@@ -125,6 +186,18 @@ export default function App() {
     Alert.alert('Friction Reduced', 'Habit target reset to baseline.');
     loadData();
   };
+
+  // 2. Loading Screen Guard (Prevents querying uncreated tables)
+  if (!isDbReady) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#38bdf8" />
+        <Text style={styles.loadingText}>
+          {dbError ? `Error: ${dbError}` : 'Initializing Greenlight Database...'}
+        </Text>
+      </View>
+    );
+  }
 
   const score = calculateDailyScore(today);
 
@@ -194,7 +267,7 @@ export default function App() {
               
               <View style={styles.cardSubRow}>
                 <Text style={styles.goalSub}>Max Goal Limit: {item.max_goal_integer} {item.unit}</Text>
-                <Text style={styles.streakBadge}>🔥 {item.streak}d streak</Text>
+                <Text style={styles.streakBadge}>🔥 {item.streak || 0}d streak</Text>
               </View>
 
               <View style={styles.actionRow}>
@@ -233,7 +306,7 @@ export default function App() {
               style={styles.input} 
               value={newTargetInteger} 
               onChangeText={setNewTargetInteger} 
-              keyboardType="numeric" 
+              keyboardDataType="numeric" 
               placeholder="e.g., 2" 
               placeholderTextColor="#64748b" 
             />
@@ -283,6 +356,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a', paddingHorizontal: 16, paddingTop: 40 },
+  loadingContainer: { flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center' },
+  loadingText: { color: '#94a3b8', marginTop: 12, fontSize: 14 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingHorizontal: 4 },
   title: { fontSize: 24, fontWeight: 'bold', color: '#f8fafc' },
   subtitle: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
@@ -323,6 +398,6 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 24 },
   cancelBtn: { flex: 1, backgroundColor: '#334155', padding: 14, borderRadius: 8, alignItems: 'center' },
   cancelText: { color: '#cbd5e1', fontWeight: 'bold' },
-  saveModalBtn: { flex: 1, backgroundColor: '#22c55e', padding: 14, borderRadius: 8, alignItems: 'center' },
+  saveModalBtn: { flex: 1, backgroundColor: '#22c55e', padding: 14, borderRadius: '8' as any, alignItems: 'center' },
   saveModalText: { color: '#0f172a', fontWeight: 'bold' },
 });
