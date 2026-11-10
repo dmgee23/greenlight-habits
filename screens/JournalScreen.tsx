@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { db } from '../db/schema';
 import { calculateDailyScore } from '../services/habitEngine';
-import { generateDailyReflectionInsight } from '../services/aiService';
 
 export default function JournalScreen() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -14,9 +15,6 @@ export default function JournalScreen() {
   const [eveningWin, setEveningWin] = useState('');
   const [greenlightMoment, setGreenlightMoment] = useState('');
   const [unforgivingHonesty, setUnforgivingHonesty] = useState('');
-
-  const [aiInsight, setAiInsight] = useState('');
-  const [loadingAi, setLoadingAi] = useState(false);
 
   useEffect(() => {
     loadJournal(selectedDate);
@@ -42,7 +40,6 @@ export default function JournalScreen() {
       setGreenlightMoment('');
       setUnforgivingHonesty('');
     }
-    setAiInsight('');
   };
 
   const changeDateByDays = (days: number) => {
@@ -67,19 +64,49 @@ export default function JournalScreen() {
     Alert.alert('Saved', `Journal entry saved for ${selectedDate}`);
   };
 
-  const handleGenerateAI = async () => {
-    setLoadingAi(true);
+  const handleSaveMarkdownFile = async () => {
+    handleSaveJournal();
     const score = calculateDailyScore(selectedDate);
 
-    const insight = await generateDailyReflectionInsight(
-      selectedDate,
-      { gratitude: morningGratitude, nonNegotiable: dailyNonNegotiable, identity: identityAffirmation },
-      { win: eveningWin, greenlight: greenlightMoment, honesty: unforgivingHonesty },
-      score
-    );
+    const markdownContent = `# Daily Journal: ${selectedDate}
 
-    setAiInsight(insight);
-    setLoadingAi(false);
+## 📊 Daily Success Score: ${score}%
+
+### ☀️ Morning Intentions
+- **Gratitude:** ${morningGratitude || 'N/A'}
+- **Daily Non-Negotiable:** ${dailyNonNegotiable || 'N/A'}
+- **Identity Affirmation:** ${identityAffirmation || 'N/A'}
+
+### 🌙 Evening Audit & Greenlights
+- **Evening Win:** ${eveningWin || 'N/A'}
+- **Greenlight Moment:** ${greenlightMoment || 'N/A'}
+- **Unforgiving Honesty / Reflection:** ${unforgivingHonesty || 'N/A'}
+
+---
+*Generated via Greenlight Habits App*
+`;
+
+    try {
+      const fileName = `Journal_${selectedDate}.md`;
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+
+      await FileSystem.writeAsStringAsync(fileUri, markdownContent, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/markdown',
+          dialogTitle: 'Save Journal Markdown File',
+          UTI: 'public.plain-text',
+        });
+      } else {
+        Alert.alert('Saved Locally', `File saved to local storage: ${fileName}`);
+      }
+    } catch (error) {
+      console.error('Error saving markdown file:', error);
+      Alert.alert('Error', 'Failed to generate markdown file.');
+    }
   };
 
   return (
@@ -119,23 +146,11 @@ export default function JournalScreen() {
         <TouchableOpacity style={styles.saveBtn} onPress={handleSaveJournal}>
           <Text style={styles.saveBtnText}>Save Entry</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.aiBtn} onPress={handleGenerateAI} disabled={loadingAi}>
-          {loadingAi ? (
-            <ActivityIndicator color="#0f172a" />
-          ) : (
-            <Text style={styles.aiBtnText}>🤖 AI Feedback</Text>
-          )}
-        </TouchableOpacity>
       </View>
 
-      {/* AI Feedback Output Card */}
-      {aiInsight !== '' && (
-        <View style={styles.aiCard}>
-          <Text style={styles.aiTitle}>🤖 AI Coach Analysis</Text>
-          <Text style={styles.aiText}>{aiInsight}</Text>
-        </View>
-      )}
+      <TouchableOpacity style={styles.mdBtn} onPress={handleSaveMarkdownFile}>
+        <Text style={styles.mdBtnText}>📄 Save .MD File</Text>
+      </TouchableOpacity>
 
       <View style={{ height: 40 }} />
     </ScrollView>
@@ -154,9 +169,6 @@ const styles = StyleSheet.create({
   buttonRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
   saveBtn: { flex: 1, backgroundColor: '#334155', padding: 14, borderRadius: 8, alignItems: 'center' },
   saveBtnText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 14 },
-  aiBtn: { flex: 1, backgroundColor: '#38bdf8', padding: 14, borderRadius: 8, alignItems: 'center' },
-  aiBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 14 },
-  aiCard: { backgroundColor: '#1e293b', borderColor: '#38bdf8', borderWidth: 1, borderRadius: 12, padding: 16, marginTop: 20 },
-  aiTitle: { color: '#38bdf8', fontWeight: 'bold', fontSize: 16, marginBottom: 8 },
-  aiText: { color: '#e2e8f0', fontSize: 14, lineHeight: 20 },
+  mdBtn: { backgroundColor: '#10b981', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 12 },
+  mdBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 14 },
 });

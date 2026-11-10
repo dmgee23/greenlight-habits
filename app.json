@@ -1,37 +1,36 @@
 {
   "expo": {
-    "name": "GreenlightHabits",
+    "name": "Greenlight Habits",
     "slug": "GreenlightHabits",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dmgee23.greenlighthabits"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f172a"
       },
-      "predictiveBackGestureEnabled": false,
-      "package": "com.dmgee23.GreenlightHabits"
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "package": "com.dmgee23.greenlighthabits",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "plugins": [
       "expo-sqlite",
-      "expo-sharing",
-      "expo-status-bar",
-      "expo-font"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "d04bd791-8b68-4449-a2be-6cc3aac05e50"
-      }
-    }
+      "expo-notifications"
+    ]
   }
 }
