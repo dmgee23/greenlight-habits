@@ -1,6 +1,5 @@
 import * as SQLite from 'expo-sqlite';
 
-// Open (or create) the local SQLite database file
 const db = SQLite.openDatabaseSync('greenlight_habits.db');
 
 export function initializeDatabase() {
@@ -17,7 +16,8 @@ export function initializeDatabase() {
       base_target REAL NOT NULL,
       max_goal_integer INTEGER NOT NULL,
       reminder_time TEXT,
-      streak INTEGER DEFAULT 0
+      streak INTEGER DEFAULT 0,
+      is_inverse INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS habit_logs (

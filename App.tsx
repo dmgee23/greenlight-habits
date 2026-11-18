@@ -12,12 +12,40 @@ import {
   SafeAreaView, 
   Platform 
 } from 'react-native';
-import { initializeDatabase } from './db/schema';
-import AppNavigator from './navigation/AppNavigator'; // Keep if you use a separate navigator file
 
-// ----------------------------------------------------------------------
-// MOCK OR IMPORTED DATABASE HELPERS & INTERFACES (Adjust as per your project)
-// ----------------------------------------------------------------------
+// Imports from Schema
+import { initializeDatabase } from './db/schema';
+import { setupNotificationResponseListener } from './db/database';
+
+// Imports from Database Helpers
+import { 
+  initDatabase,
+  getHabits,
+  addHabit,
+  updateHabit,
+  completeHabit,
+  resetToBaseline,
+  calculateDailyScore,
+  getWeeklyCompletionStats,
+  registerForPushNotificationsAsync,
+  scheduleMorningReminder,
+  scheduleEveningReminder
+} from './db/database';
+
+import JournalScreen from './screens/JournalScreen';
+
+// Global error handler to catch silent JS crashes in standalone preview builds
+declare const ErrorUtils: any;
+if (typeof ErrorUtils !== 'undefined' && ErrorUtils.getGlobalHandler) {
+  const defaultHandler = ErrorUtils.getGlobalHandler();
+  ErrorUtils.setGlobalHandler((error: any, isFatal: boolean) => {
+    console.error('FATAL_JS_CRASH:', error);
+    if (defaultHandler) {
+      defaultHandler(error, isFatal);
+    }
+  });
+}
+
 interface Habit {
   id?: number;
   title: string;
@@ -29,24 +57,8 @@ interface Habit {
   max_goal_integer: number;
   reminder_time?: string;
   streak?: number;
+  is_inverse?: number;
 }
-
-// Ensure these match your actual implementation or database service file
-import { 
-  initDatabase, 
-  getHabits, 
-  addHabit, 
-  updateHabit, 
-  completeHabit, 
-  resetToBaseline, 
-  calculateDailyScore, 
-  getWeeklyCompletionStats, 
-  registerForPushNotificationsAsync, 
-  scheduleMorningReminder, 
-  scheduleEveningReminder 
-} from './db/database'; // Adjust path to your database helper file
-
-import JournalScreen from './screens/JournalScreen'; // Adjust path if necessary
 
 export default function App() {
   const [isDbReady, setIsDbReady] = useState(false);
@@ -65,8 +77,25 @@ export default function App() {
   const [newTargetInteger, setNewTargetInteger] = useState('2'); 
   const [newMaxGoalInteger, setNewMaxGoalInteger] = useState('25');
   const [newReminderTime, setNewReminderTime] = useState('18:30');
+  const [newIsInverse, setNewIsInverse] = useState(false);
 
   const today = new Date().toISOString().split('T')[0];
+
+  // Notification Response Listener setup
+  useEffect(() => {
+    const subscription = setupNotificationResponseListener((targetScreen) => {
+      console.log('Notification clicked, navigating to:', targetScreen);
+      if (targetScreen === '/journal' || targetScreen === 'journal') {
+        setCurrentTab('journal');
+      } else {
+        setCurrentTab('habits');
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   // 1. Initial Database Setup & Migration Guard
   useEffect(() => {
@@ -95,7 +124,7 @@ export default function App() {
 
   const loadData = () => {
     try {
-      let currentHabits = getHabits();
+      let currentHabits = getHabits() as Habit[];
       if (currentHabits.length === 0) {
         addHabit({
           title: 'Read Books',
@@ -106,8 +135,9 @@ export default function App() {
           base_target: 2,
           max_goal_integer: 25,
           reminder_time: "07:30",
+          is_inverse: 0,
         });
-        currentHabits = getHabits();
+        currentHabits = getHabits() as Habit[];
       }
       setHabits(currentHabits);
       setWeeklyStats(getWeeklyCompletionStats());
@@ -123,6 +153,7 @@ export default function App() {
     setNewTargetInteger('2');
     setNewMaxGoalInteger('25');
     setNewReminderTime('18:30');
+    setNewIsInverse(false);
     setModalVisible(true);
   };
 
@@ -133,6 +164,7 @@ export default function App() {
     setNewTargetInteger(habit.base_target.toString());
     setNewMaxGoalInteger(habit.max_goal_integer.toString());
     setNewReminderTime(habit.reminder_time || '18:30');
+    setNewIsInverse(habit.is_inverse === 1);
     setModalVisible(true);
   };
 
@@ -154,6 +186,7 @@ export default function App() {
           base_target: baseNum,
           max_goal_integer: maxGoalNum,
           reminder_time: newReminderTime,
+          is_inverse: newIsInverse ? 1 : 0,
         });
         Alert.alert('Success', 'Habit updated successfully!');
       }
@@ -167,6 +200,7 @@ export default function App() {
         base_target: baseNum,
         max_goal_integer: maxGoalNum,
         reminder_time: newReminderTime,
+        is_inverse: newIsInverse ? 1 : 0,
       });
       Alert.alert('Success', 'New micro-habit created!');
     }
@@ -177,7 +211,7 @@ export default function App() {
 
   const handleComplete = (habit: Habit) => {
     completeHabit(habit, habit.current_target, 'Logged from main view');
-    Alert.alert('Greenlight!', 'Target increased for tomorrow!');
+    Alert.alert('Greenlight!', habit.is_inverse ? 'Target decreased for tomorrow!' : 'Target increased for tomorrow!');
     loadData();
   };
 
@@ -253,7 +287,9 @@ export default function App() {
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <View>
-                  <Text style={styles.habitTitle}>{item.title}</Text>
+                  <Text style={styles.habitTitle}>
+                    {item.title} {item.is_inverse ? '📉 (Inverse)' : ''}
+                  </Text>
                   <Text style={styles.cueBadge}>🔔 Cue Time: {item.reminder_time || 'None'}</Text>
                 </View>
                 <TouchableOpacity style={styles.editCardBtn} onPress={() => openEditModal(item)}>
@@ -266,7 +302,7 @@ export default function App() {
               </Text>
               
               <View style={styles.cardSubRow}>
-                <Text style={styles.goalSub}>Max Goal Limit: {item.max_goal_integer} {item.unit}</Text>
+                <Text style={styles.goalSub}>Goal Limit: {item.max_goal_integer} {item.unit}</Text>
                 <Text style={styles.streakBadge}>🔥 {item.streak || 0}d streak</Text>
               </View>
 
@@ -301,12 +337,13 @@ export default function App() {
               placeholderTextColor="#64748b" 
             />
 
-            <Text style={styles.label}>Starting Target (Integer Baseline)</Text>
+            <Text style={styles.label}>Starting Target (Baseline)</Text>
             <TextInput 
               style={styles.input} 
               value={newTargetInteger} 
               onChangeText={setNewTargetInteger} 
-              keyboardDataType="numeric" 
+              keyboardDataType="numeric"
+              keyboardType="numeric" 
               placeholder="e.g., 2" 
               placeholderTextColor="#64748b" 
             />
@@ -320,7 +357,7 @@ export default function App() {
               placeholderTextColor="#64748b" 
             />
 
-            <Text style={styles.label}>Max Goal Ceiling</Text>
+            <Text style={styles.label}>Goal Limit</Text>
             <TextInput 
               style={styles.input} 
               value={newMaxGoalInteger} 
@@ -338,6 +375,16 @@ export default function App() {
               placeholder="e.g., 18:30" 
               placeholderTextColor="#64748b" 
             />
+
+            {/* Inverse Habit Toggle */}
+            <TouchableOpacity 
+              style={[styles.toggleBtn, newIsInverse && styles.toggleActive]}
+              onPress={() => setNewIsInverse(!newIsInverse)}
+            >
+              <Text style={styles.toggleText}>
+                {newIsInverse ? '📉 Mode: Reducing Over Time (Inverse)' : '📈 Mode: Increasing Over Time (Standard)'}
+              </Text>
+            </TouchableOpacity>
 
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
@@ -395,9 +442,12 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#f8fafc', marginBottom: 16 },
   label: { color: '#cbd5e1', fontSize: 14, fontWeight: '600', marginBottom: 4, marginTop: 10 },
   input: { backgroundColor: '#0f172a', color: '#f8fafc', borderRadius: 8, padding: 12, fontSize: 15 },
+  toggleBtn: { backgroundColor: '#0f172a', padding: 12, borderRadius: 8, marginTop: 14, borderWidth: 1, borderColor: '#334155', alignItems: 'center' },
+  toggleActive: { borderColor: '#38bdf8', backgroundColor: '#1e3a8a' },
+  toggleText: { color: '#f8fafc', fontSize: 13, fontWeight: '600' },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 24 },
   cancelBtn: { flex: 1, backgroundColor: '#334155', padding: 14, borderRadius: 8, alignItems: 'center' },
   cancelText: { color: '#cbd5e1', fontWeight: 'bold' },
-  saveModalBtn: { flex: 1, backgroundColor: '#22c55e', padding: 14, borderRadius: '8' as any, alignItems: 'center' },
+  saveModalBtn: { flex: 1, backgroundColor: '#22c55e', padding: 14, borderRadius: 8, alignItems: 'center' },
   saveModalText: { color: '#0f172a', fontWeight: 'bold' },
 });

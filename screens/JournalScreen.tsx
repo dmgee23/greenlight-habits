@@ -1,174 +1,363 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, TextInput, ScrollView, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as Clipboard from 'expo-clipboard';
 import { db } from '../db/schema';
-import { calculateDailyScore } from '../services/habitEngine';
 
 export default function JournalScreen() {
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-
-  const [morningGratitude, setMorningGratitude] = useState('');
-  const [dailyNonNegotiable, setDailyNonNegotiable] = useState('');
-  const [identityAffirmation, setIdentityAffirmation] = useState('');
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const today = `${year}-${month}-${day}`;
   
-  const [eveningWin, setEveningWin] = useState('');
-  const [greenlightMoment, setGreenlightMoment] = useState('');
-  const [unforgivingHonesty, setUnforgivingHonesty] = useState('');
+  // Morning Intentions & Engineering Priorities
+  const [gratitude, setGratitude] = useState('');
+  const [nonNegotiable, setNonNegotiable] = useState('');
+  const [affirmation, setAffirmation] = useState('');
+  const [priority1, setPriority1] = useState('');
+  const [priority2, setPriority2] = useState('');
+  const [priority3, setPriority3] = useState('');
 
+  // Evening Audit & Engineering Reflections
+  const [win, setWin] = useState('');
+  const [greenlight, setGreenlight] = useState('');
+  const [wentRight, setWentRight] = useState('');
+  const [wentWrong, setWentWrong] = useState('');
+  const [doDifferent, setDoDifferent] = useState('');
+  const [nextActions, setNextActions] = useState('');
+  const [relatedLinks, setRelatedLinks] = useState('');
+
+  // Dynamic height state for text inputs to auto-expand
+  const [inputHeights, setInputHeights] = useState<{ [key: string]: number }>({});
+
+  const handleContentSizeChange = (key: string, height: number) => {
+    setInputHeights(prev => ({ ...prev, [key]: Math.max(44, height) }));
+  };
+
+  const [isLoaded, setIsLoaded] = useState(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 1. Load existing data on mount
   useEffect(() => {
-    loadJournal(selectedDate);
-  }, [selectedDate]);
-
-  const loadJournal = (dateStr: string) => {
-    const entry = db.getFirstSync<any>(
-      `SELECT * FROM journal_entries WHERE date = ?`,
-      [dateStr]
-    );
-    if (entry) {
-      setMorningGratitude(entry.morning_gratitude || '');
-      setDailyNonNegotiable(entry.daily_non_negotiable || '');
-      setIdentityAffirmation(entry.identity_affirmation || '');
-      setEveningWin(entry.evening_win || '');
-      setGreenlightMoment(entry.greenlight_moment || '');
-      setUnforgivingHonesty(entry.unforgiving_honesty_reflection || '');
-    } else {
-      setMorningGratitude('');
-      setDailyNonNegotiable('');
-      setIdentityAffirmation('');
-      setEveningWin('');
-      setGreenlightMoment('');
-      setUnforgivingHonesty('');
-    }
-  };
-
-  const changeDateByDays = (days: number) => {
-    const current = new Date(selectedDate);
-    current.setDate(current.getDate() + days);
-    setSelectedDate(current.toISOString().split('T')[0]);
-  };
-
-  const handleSaveJournal = () => {
-    db.runSync(
-      `INSERT INTO journal_entries (date, morning_gratitude, daily_non_negotiable, identity_affirmation, evening_win, greenlight_moment, unforgiving_honesty_reflection)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(date) DO UPDATE SET
-         morning_gratitude = excluded.morning_gratitude,
-         daily_non_negotiable = excluded.daily_non_negotiable,
-         identity_affirmation = excluded.identity_affirmation,
-         evening_win = excluded.evening_win,
-         greenlight_moment = excluded.greenlight_moment,
-         unforgiving_honesty_reflection = excluded.unforgiving_honesty_reflection`,
-      [selectedDate, morningGratitude, dailyNonNegotiable, identityAffirmation, eveningWin, greenlightMoment, unforgivingHonesty]
-    );
-    Alert.alert('Saved', `Journal entry saved for ${selectedDate}`);
-  };
-
-  const handleSaveMarkdownFile = async () => {
-    handleSaveJournal();
-    const score = calculateDailyScore(selectedDate);
-
-    const markdownContent = `# Daily Journal: ${selectedDate}
-
-## 📊 Daily Success Score: ${score}%
-
-### ☀️ Morning Intentions
-- **Gratitude:** ${morningGratitude || 'N/A'}
-- **Daily Non-Negotiable:** ${dailyNonNegotiable || 'N/A'}
-- **Identity Affirmation:** ${identityAffirmation || 'N/A'}
-
-### 🌙 Evening Audit & Greenlights
-- **Evening Win:** ${eveningWin || 'N/A'}
-- **Greenlight Moment:** ${greenlightMoment || 'N/A'}
-- **Unforgiving Honesty / Reflection:** ${unforgivingHonesty || 'N/A'}
-
----
-*Generated via Greenlight Habits App*
-`;
-
     try {
-      const fileName = `Journal_${selectedDate}.md`;
-      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      const result: any = db.getAllSync('SELECT * FROM journal_entries WHERE date = ?;', [today]);
+      if (result && result.length > 0) {
+        const row = result[0];
+        setGratitude(row.morning_gratitude || '');
+        setNonNegotiable(row.daily_non_negotiable || '');
+        setAffirmation(row.identity_affirmation || '');
+        setWin(row.evening_win || '');
+        setGreenlight(row.greenlight_moment || '');
+        
+        try {
+          if (row.unforgiving_honesty_reflection) {
+            const extra = JSON.parse(row.unforgiving_honesty_reflection);
+            setPriority1(extra.priority1 || '');
+            setPriority2(extra.priority2 || '');
+            setPriority3(extra.priority3 || '');
+            setWentRight(extra.wentRight || '');
+            setWentWrong(extra.wentWrong || '');
+            setDoDifferent(extra.doDifferent || '');
+            setNextActions(extra.nextActions || '');
+            setRelatedLinks(extra.relatedLinks || '');
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      console.error('Error loading journal entry:', e);
+    }
+    setIsLoaded(true);
+  }, [today]);
 
-      await FileSystem.writeAsStringAsync(fileUri, markdownContent, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
+  // 2. Auto-save to SQLite on debounce as you type
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+        const extraFieldsJson = JSON.stringify({
+          priority1,
+          priority2,
+          priority3,
+          wentRight,
+          wentWrong,
+          doDifferent,
+          nextActions,
+          relatedLinks,
+        });
+
+        db.runSync(
+          `INSERT INTO journal_entries 
+            (date, morning_gratitude, daily_non_negotiable, identity_affirmation, evening_win, greenlight_moment, unforgiving_honesty_reflection)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(date) DO UPDATE SET
+            morning_gratitude = EXCLUDED.morning_gratitude,
+            daily_non_negotiable = EXCLUDED.daily_non_negotiable,
+            identity_affirmation = EXCLUDED.identity_affirmation,
+            evening_win = EXCLUDED.evening_win,
+            greenlight_moment = EXCLUDED.greenlight_moment,
+            unforgiving_honesty_reflection = EXCLUDED.unforgiving_honesty_reflection;`,
+          [today, gratitude, nonNegotiable, affirmation, win, greenlight, extraFieldsJson]
+        );
+      } catch (err) {
+        console.error('Auto-save error:', err);
+      }
+    }, 500);
+  }, [gratitude, nonNegotiable, affirmation, priority1, priority2, priority3, win, greenlight, wentRight, wentWrong, doDifferent, nextActions, relatedLinks, isLoaded, today]);
+
+  // Generate Obsidian-ready Markdown template
+  const generateMarkdownExport = () => {
+    return `---
+date: ${today}
+tags: [daily-notes, greenlight, engineering]
+---
+
+### Data: ${today}
+
+## 🌅 Greenlight Morning Intentions
+- **Gratidão:** ${gratitude || '-'}
+- **#1 Inegociável:** ${nonNegotiable || '-'}
+- **Afirmação de Identidade:** ${affirmation || '-'}
+
+## 🎯 Top 3 Prioridades & Tarefas
+- [ ] ${priority1 || '(Prioridade 1)'}
+- [ ] ${priority2 || '(Prioridade 2)'}
+- [ ] ${priority3 || '(Prioridade 3)'}
+
+## 🔄 Reflexão & Engenharia
+### O que deu certo?
+${wentRight || win || '- '}
+
+### O que deu errado?
+${wentWrong || '- '}
+
+### O que posso fazer diferente?
+${doDifferent || '- '}
+
+## 🌇 Greenlight Evening Audit
+- **Momento Greenlight:** ${greenlight || '-'}
+
+## 📋 Próximas Ações & Manutenção
+${nextActions || '- '}
+
+## 🔗 Links Relacionados
+${relatedLinks || '- '}
+`;
+  };
+
+  const handleCopyExport = async () => {
+    const markdown = generateMarkdownExport();
+    await Clipboard.setStringAsync(markdown);
+    Alert.alert('Copiado!', 'O resumo do diário foi copiado para a área de transferência.');
+  };
+
+  const handleExportMdFile = async () => {
+    try {
+      const markdownContent = generateMarkdownExport();
+      const fileName = `${today}.md`;
+
+      const mdFile = new File(Paths.cache, fileName);
+      mdFile.write(markdownContent);
 
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
+        await Sharing.shareAsync(mdFile.uri, {
           mimeType: 'text/markdown',
-          dialogTitle: 'Save Journal Markdown File',
+          dialogTitle: `Salvar ou Compartilhar ${fileName}`,
           UTI: 'public.plain-text',
         });
       } else {
-        Alert.alert('Saved Locally', `File saved to local storage: ${fileName}`);
+        Alert.alert('Salvo!', `Arquivo gerado em: ${mdFile.uri}`);
       }
-    } catch (error) {
-      console.error('Error saving markdown file:', error);
-      Alert.alert('Error', 'Failed to generate markdown file.');
+    } catch (error: any) {
+      console.error('Erro ao gerar arquivo .md:', error);
+      Alert.alert('Erro', `Não foi possível gerar o arquivo: ${error?.message || error}`);
     }
   };
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Date Navigation Bar */}
-      <View style={styles.dateSelector}>
-        <TouchableOpacity style={styles.dateBtn} onPress={() => changeDateByDays(-1)}>
-          <Text style={styles.dateBtnText}>◀ Prev Day</Text>
-        </TouchableOpacity>
-        <Text style={styles.dateText}>{selectedDate}</Text>
-        <TouchableOpacity style={styles.dateBtn} onPress={() => changeDateByDays(1)}>
-          <Text style={styles.dateBtnText}>Next Day ▶</Text>
-        </TouchableOpacity>
-      </View>
+    <KeyboardAvoidingView 
+      style={{ flex: 1, backgroundColor: '#0f172a' }} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
+    >
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+        <Text style={styles.headerTitle}>📓 Diário Integrado</Text>
+        <Text style={styles.dateSubtitle}>Data: {today} (Auto-salvando no SQLite)</Text>
 
-      <Text style={styles.sectionHeader}>☀️ Morning Intentions</Text>
-      <Text style={styles.label}>Morning Gratitude</Text>
-      <TextInput style={styles.input} value={morningGratitude} onChangeText={setMorningGratitude} placeholder="What are you grateful for today?" placeholderTextColor="#64748b" />
+        {/* Morning Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>☀️ Morning Intentions</Text>
 
-      <Text style={styles.label}>Daily Non-Negotiable</Text>
-      <TextInput style={styles.input} value={dailyNonNegotiable} onChangeText={setDailyNonNegotiable} placeholder="What must get done today?" placeholderTextColor="#64748b" />
+          <Text style={styles.label}>1. What am I grateful for today?</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['gratitude'] || 44 }]} 
+            multiline
+            onContentSizeChange={(e) => handleContentSizeChange('gratitude', e.nativeEvent.contentSize.height)}
+            value={gratitude} 
+            onChangeText={setGratitude} 
+            placeholder="3 quick wins or things..." 
+            placeholderTextColor="#64748b" 
+          />
 
-      <Text style={styles.label}>Identity Affirmation</Text>
-      <TextInput style={styles.input} value={identityAffirmation} onChangeText={setIdentityAffirmation} placeholder="Who are you choosing to be today?" placeholderTextColor="#64748b" />
+          <Text style={styles.label}>2. The #1 Non-Negotiable Goal</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['nonNegotiable'] || 44 }]} 
+            multiline
+            onContentSizeChange={(e) => handleContentSizeChange('nonNegotiable', e.nativeEvent.contentSize.height)}
+            value={nonNegotiable} 
+            onChangeText={setNonNegotiable} 
+            placeholder="If only 1 thing gets done today..." 
+            placeholderTextColor="#64748b" 
+          />
 
-      <Text style={[styles.sectionHeader, { marginTop: 24 }]}>🌙 Evening Audit & Greenlights</Text>
-      <Text style={styles.label}>Evening Win</Text>
-      <TextInput style={styles.input} value={eveningWin} onChangeText={setEveningWin} placeholder="What was your primary win today?" placeholderTextColor="#64748b" />
+          <Text style={styles.label}>3. Identity Affirmation</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['affirmation'] || 44 }]} 
+            multiline
+            onContentSizeChange={(e) => handleContentSizeChange('affirmation', e.nativeEvent.contentSize.height)}
+            value={affirmation} 
+            onChangeText={setAffirmation} 
+            placeholder="I am the type of person who..." 
+            placeholderTextColor="#64748b" 
+          />
+        </View>
 
-      <Text style={styles.label}>Greenlight Moment</Text>
-      <TextInput style={styles.input} value={greenlightMoment} onChangeText={setGreenlightMoment} placeholder="Where did life turn a yellow light green?" placeholderTextColor="#64748b" />
+        {/* Engineering Top 3 Priorities */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>🎯 Top 3 Prioridades & Tarefas</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['p1'] || 44 }]} 
+            multiline
+            onContentSizeChange={(e) => handleContentSizeChange('p1', e.nativeEvent.contentSize.height)}
+            value={priority1} 
+            onChangeText={setPriority1} 
+            placeholder="1. Prioridade principal..." 
+            placeholderTextColor="#64748b" 
+          />
+          <TextInput 
+            style={[styles.input, { height: inputHeights['p2'] || 44 }]} 
+            multiline
+            onContentSizeChange={(e) => handleContentSizeChange('p2', e.nativeEvent.contentSize.height)}
+            value={priority2} 
+            onChangeText={setPriority2} 
+            placeholder="2. Segunda prioridade..." 
+            placeholderTextColor="#64748b" 
+          />
+          <TextInput 
+            style={[styles.input, { height: inputHeights['p3'] || 44 }]} 
+            multiline
+            onContentSizeChange={(e) => handleContentSizeChange('p3', e.nativeEvent.contentSize.height)}
+            value={priority3} 
+            onChangeText={setPriority3} 
+            placeholder="3. Terceira prioridade..." 
+            placeholderTextColor="#64748b" 
+          />
+        </View>
 
-      <Text style={styles.label}>Unforgiving Honesty / Reflection</Text>
-      <TextInput style={[styles.input, { height: 80 }]} multiline value={unforgivingHonesty} onChangeText={setUnforgivingHonesty} placeholder="Where did you create friction or avoid truth?" placeholderTextColor="#64748b" />
+        {/* Engineering & Evening Audit Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>🌙 Evening Audit & Reflexão</Text>
 
-      <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSaveJournal}>
-          <Text style={styles.saveBtnText}>Save Entry</Text>
-        </TouchableOpacity>
-      </View>
+          <Text style={styles.label}>Today's Big Win / O que deu certo?</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['wentRight'] || 80 }]} 
+            multiline 
+            onContentSizeChange={(e) => handleContentSizeChange('wentRight', e.nativeEvent.contentSize.height)}
+            value={wentRight} 
+            onChangeText={setWentRight} 
+            placeholder="What went well / Descreva o que funcionou..." 
+            placeholderTextColor="#64748b" 
+          />
 
-      <TouchableOpacity style={styles.mdBtn} onPress={handleSaveMarkdownFile}>
-        <Text style={styles.mdBtnText}>📄 Save .MD File</Text>
-      </TouchableOpacity>
+          <Text style={styles.label}>O que deu errado?</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['wentWrong'] || 80 }]} 
+            multiline 
+            onContentSizeChange={(e) => handleContentSizeChange('wentWrong', e.nativeEvent.contentSize.height)}
+            value={wentWrong} 
+            onChangeText={setWentWrong} 
+            placeholder="Imprevistos ou falhas..." 
+            placeholderTextColor="#64748b" 
+          />
 
-      <View style={{ height: 40 }} />
-    </ScrollView>
+          <Text style={styles.label}>O que posso fazer diferente?</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['doDifferent'] || 80 }]} 
+            multiline 
+            onContentSizeChange={(e) => handleContentSizeChange('doDifferent', e.nativeEvent.contentSize.height)}
+            value={doDifferent} 
+            onChangeText={setDoDifferent} 
+            placeholder="Ajustes e melhorias para amanhã..." 
+            placeholderTextColor="#64748b" 
+          />
+
+          <Text style={styles.label}>McConaughey Greenlight Moment</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['greenlight'] || 44 }]} 
+            multiline
+            onContentSizeChange={(e) => handleContentSizeChange('greenlight', e.nativeEvent.contentSize.height)}
+            value={greenlight} 
+            onChangeText={setGreenlight} 
+            placeholder="Where did I turn an obstacle into progress?" 
+            placeholderTextColor="#64748b" 
+          />
+        </View>
+
+        {/* Next Actions & Links */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>📋 Próximas Ações & Links</Text>
+          
+          <Text style={styles.label}>Próximas Ações</Text>
+          <TextInput 
+            style={[styles.input, { height: inputHeights['nextActions'] || 80 }]} 
+            multiline 
+            onContentSizeChange={(e) => handleContentSizeChange('nextActions', e.nativeEvent.contentSize.height)}
+            value={nextActions} 
+            onChangeText={setNextActions} 
+            placeholder="- Próximo passo..." 
+            placeholderTextColor="#64748b" 
+          />
+
+          <Text style={styles.label}>Links Relacionados</Text>
+          <TextInput 
+            style={[styles.input, styles.textArea, { height: inputHeights['relatedLinks'] || 80 }]} 
+            multiline 
+            onContentSizeChange={(e) => handleContentSizeChange('relatedLinks', e.nativeEvent.contentSize.height)}
+            value={relatedLinks} 
+            onChangeText={setRelatedLinks} 
+            placeholder="[[Nota do Obsidian]] ou URLs..." 
+            placeholderTextColor="#64748b" 
+          />
+        </View>
+
+        {/* Export Action Buttons */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.saveFileBtn} onPress={handleExportMdFile}>
+            <Text style={styles.btnText}>💾 Exportar .md</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.copyBtn} onPress={handleCopyExport}>
+            <Text style={styles.btnText}>📋 Copiar Texto</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  dateSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, backgroundColor: '#1e293b', padding: 12, borderRadius: 8 },
-  dateBtn: { backgroundColor: '#334155', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  dateBtnText: { color: '#38bdf8', fontWeight: 'bold', fontSize: 13 },
-  dateText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 16 },
-  sectionHeader: { fontSize: 18, fontWeight: 'bold', color: '#38bdf8', marginBottom: 12 },
-  label: { color: '#cbd5e1', fontSize: 14, fontWeight: '600', marginBottom: 4, marginTop: 8 },
-  input: { backgroundColor: '#1e293b', color: '#f8fafc', borderRadius: 8, padding: 12, fontSize: 15, borderWidth: 1, borderColor: '#334155' },
-  buttonRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
-  saveBtn: { flex: 1, backgroundColor: '#334155', padding: 14, borderRadius: 8, alignItems: 'center' },
-  saveBtnText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 14 },
-  mdBtn: { backgroundColor: '#10b981', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 12 },
-  mdBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 14 },
+  container: { flex: 1, backgroundColor: '#0f172a', padding: 16 },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#f8fafc', marginBottom: 2 },
+  dateSubtitle: { fontSize: 12, color: '#38bdf8', marginBottom: 16 },
+  sectionCard: { backgroundColor: '#1e293b', borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#38bdf8', marginBottom: 12 },
+  label: { color: '#cbd5e1', fontSize: 13, fontWeight: '600', marginBottom: 4, marginTop: 8 },
+  input: { backgroundColor: '#0f172a', color: '#f8fafc', borderRadius: 8, padding: 12, fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: '#334155', textAlignVertical: 'top' },
+  textArea: { height: 80, textAlignVertical: 'top' },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 8, marginBottom: 20 },
+  saveFileBtn: { flex: 1, backgroundColor: '#3b82f6', padding: 16, borderRadius: 10, alignItems: 'center' },
+  copyBtn: { flex: 1, backgroundColor: '#22c55e', padding: 16, borderRadius: 10, alignItems: 'center' },
+  btnText: { color: '#f8fafc', fontWeight: 'bold', fontSize: 14 },
 });

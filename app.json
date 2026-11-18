@@ -1,30 +1,13 @@
 {
   "expo": {
     "name": "Greenlight Habits",
-    "slug": "GreenlightHabits",
+    "slug": "greenlighthabits",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f172a"
-    },
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.dmgee23.greenlighthabits"
-    },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#0f172a"
-      },
       "package": "com.dmgee23.greenlighthabits",
       "permissions": [
-        "RECEIVE_BOOT_COMPLETED",
-        "SCHEDULE_EXACT_ALARM",
-        "POST_NOTIFICATIONS",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.INTERNET"
@@ -32,12 +15,13 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-notifications",
-      "expo-file-system"
+      "expo-file-system",
+      "expo-sharing",
+      "expo-status-bar"
     ],
     "extra": {
       "eas": {
-        "projectId": "d04bd791-8b68-4449-a2be-6cc3aac05e50"
+        "projectId": "d08091d7-80f6-4302-8217-eaae27503eac"
       }
     }
   }
